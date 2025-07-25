@@ -132,12 +132,15 @@
         // --- Customization for your Assistant ---
         const ASSISTANT_NAME = "Death Storm";
         const USER_TITLE = "Bozon";
+        const CONVERSATION_STORAGE_KEY = "deathStormConversation"; // Key for local storage
 
         // --- GUI Elements ---
         const chatDisplay = document.getElementById('chatDisplay');
         const userInput = document.getElementById('userInput');
         const sendButton = document.getElementById('sendButton');
         const listenButton = document.getElementById('listenButton');
+
+        let conversationHistory = []; // Array to store messages for persistence
 
         // --- Speech Synthesis (Text-to-Speech) ---
         const synth = window.speechSynthesis;
@@ -246,7 +249,7 @@
         }
 
         // --- Chat Display Logic ---
-        function updateChatDisplay(speaker, message, tag = null) {
+        function updateChatDisplay(speaker, message, tag = null, save = true) {
             const messageDiv = document.createElement('div');
             messageDiv.classList.add('message-box');
 
@@ -266,6 +269,40 @@
             messageDiv.textContent = `${speaker}: ${message}`;
             chatDisplay.appendChild(messageDiv);
             chatDisplay.scrollTop = chatDisplay.scrollHeight; // Scroll to bottom
+
+            // Save to history only if explicitly requested (not for loading old messages)
+            if (save) {
+                conversationHistory.push({ speaker, message, tag });
+                saveConversation();
+            }
+        }
+
+        // --- Conversation Persistence ---
+        function saveConversation() {
+            try {
+                localStorage.setItem(CONVERSATION_STORAGE_KEY, JSON.stringify(conversationHistory));
+            } catch (e) {
+                console.error("Error saving conversation to local storage:", e);
+                updateChatDisplay("System", "Error saving conversation history. Your browser might be in private mode or storage is full.", "error", false);
+            }
+        }
+
+        function loadConversation() {
+            try {
+                const storedConversation = localStorage.getItem(CONVERSATION_STORAGE_KEY);
+                if (storedConversation) {
+                    conversationHistory = JSON.parse(storedConversation);
+                    conversationHistory.forEach(msg => {
+                        // Pass false for 'save' to prevent re-saving already loaded messages
+                        updateChatDisplay(msg.speaker, msg.message, msg.tag, false);
+                    });
+                    updateChatDisplay("System", "Loaded previous conversation, Bozon.", "system", false);
+                }
+            } catch (e) {
+                console.error("Error loading conversation from local storage:", e);
+                updateChatDisplay("System", "Error loading previous conversation history. It might be corrupted.", "error", false);
+                conversationHistory = []; // Clear corrupted history
+            }
         }
 
         // --- Gemini API Integration ---
@@ -371,8 +408,15 @@
             });
         }
 
-        // Initial greeting on load
-        speak(`Greetings, ${USER_TITLE}! ${ASSISTANT_NAME} is ready to assist you. How may I be of service?`);
+        // --- Initialization on Page Load ---
+        loadConversation(); // Load history first
+        // Initial greeting only if no history was loaded or if it's empty
+        if (conversationHistory.length === 0) {
+            speak(`Greetings, ${USER_TITLE}! ${ASSISTANT_NAME} is ready to assist you. How may I be of service?`);
+        } else {
+            // If history was loaded, offer a fresh start or continue
+            updateChatDisplay("System", `Welcome back, ${USER_TITLE}! We can continue our last conversation, or you can start a new one.`, "system", false);
+        }
 
     </script>
 </body>
