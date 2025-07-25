@@ -141,6 +141,7 @@
         const listenButton = document.getElementById('listenButton');
 
         let conversationHistory = []; // Array to store messages for persistence
+        let isListeningContinuous = false; // New flag for continuous listening
 
         // --- Speech Synthesis (Text-to-Speech) ---
         const synth = window.speechSynthesis;
@@ -203,6 +204,13 @@
                 console.error(errorMessage);
             };
 
+            // New: After Death Storm finishes speaking, restart listening if continuous mode is active
+            utterance.onend = () => {
+                if (isListeningContinuous) {
+                    startListening(); // Restart listening automatically
+                }
+            };
+
             synth.speak(utterance);
         }
 
@@ -210,18 +218,34 @@
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         const recognition = SpeechRecognition ? new SpeechRecognition() : null;
 
-        if (recognition) {
-            recognition.continuous = false; // Listen for a single phrase
-            recognition.lang = 'en-US';
-            recognition.interimResults = false; // Only return final results
-            recognition.maxAlternatives = 1; // Get the most likely result
-
-            recognition.onstart = () => {
-                listenButton.textContent = 'Listening...';
+        function startListening() {
+            if (recognition) {
+                try {
+                    recognition.start();
+                    listenButton.textContent = 'Listening... (Speak now)';
+                    listenButton.disabled = true;
+                    updateChatDisplay("System", `Calibrating microphone for ambient noise, ${USER_TITLE}...`);
+                    updateChatDisplay("System", `Listening, ${USER_TITLE}...`);
+                } catch (e) {
+                    const errorMessage = `Microphone already active or error starting recognition: ${e.message}`;
+                    updateChatDisplay("System", errorMessage, "error");
+                    console.error(errorMessage);
+                    listenButton.textContent = 'Speak to Death Storm';
+                    listenButton.disabled = false;
+                    isListeningContinuous = false; // Disable continuous listening on error
+                }
+            } else {
                 listenButton.disabled = true;
-                updateChatDisplay("System", `Calibrating microphone for ambient noise, ${USER_TITLE}...`);
-                updateChatDisplay("System", `Listening, ${USER_TITLE}... (Speak now)`);
-            };
+                listenButton.textContent = 'Voice Input Not Supported';
+                updateChatDisplay("System", "Your browser does not support Web Speech Recognition. Please use text input.", "error");
+            }
+        }
+
+        if (recognition) {
+            recognition.continuous = false; // We will manage continuous listening manually
+            recognition.lang = 'en-US';
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
 
             recognition.onresult = (event) => {
                 const transcript = event.results[0][0].transcript;
@@ -235,11 +259,22 @@
                 console.error(errorMessage);
                 listenButton.textContent = 'Speak to Death Storm';
                 listenButton.disabled = false;
+                isListeningContinuous = false; // Stop continuous listening on error
             };
 
             recognition.onend = () => {
-                listenButton.textContent = 'Speak to Death Storm';
-                listenButton.disabled = false;
+                // If continuous listening is active, restart recognition after a short delay
+                // This creates the "turn-taking" effect
+                if (isListeningContinuous && !synth.speaking) { // Only restart if synth isn't speaking
+                    // Adding a small delay to prevent rapid restarts or conflicts
+                    setTimeout(() => {
+                        startListening();
+                    }, 500); // 0.5 second delay
+                } else if (!isListeningContinuous) {
+                    // If continuous listening is off, reset button state
+                    listenButton.textContent = 'Speak to Death Storm';
+                    listenButton.disabled = false;
+                }
             };
         } else {
             // If Web Speech API is not supported
@@ -369,8 +404,10 @@
         async function processCommand(userQuery) {
             if (userQuery.includes("exit") || userQuery.includes("quit") || userQuery.includes("stop")) {
                 speak(`Farewell, ${USER_TITLE}! I await your next command.`);
-                // In a web app, we don't destroy the window, but might disable interactions
-                // For now, just a message.
+                isListeningContinuous = false; // Stop continuous listening
+                recognition.stop(); // Explicitly stop recognition
+                listenButton.textContent = 'Speak to Death Storm'; // Reset button text
+                listenButton.disabled = false; // Re-enable button
                 return;
             }
 
@@ -398,12 +435,16 @@
 
         if (recognition) {
             listenButton.addEventListener('click', () => {
-                try {
-                    recognition.start();
-                } catch (e) {
-                    const errorMessage = `Microphone already active or error starting recognition: ${e.message}`;
-                    updateChatDisplay("System", errorMessage, "error");
-                    console.error(errorMessage);
+                if (!isListeningContinuous) { // Only start if not already continuous
+                    isListeningContinuous = true;
+                    startListening();
+                } else {
+                    // If already listening continuously, this button can act as a stop button
+                    isListeningContinuous = false;
+                    recognition.stop(); // Stop current recognition
+                    listenButton.textContent = 'Speak to Death Storm';
+                    listenButton.disabled = false;
+                    updateChatDisplay("System", "Voice input stopped.", "system");
                 }
             });
         }
